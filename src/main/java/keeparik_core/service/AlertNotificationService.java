@@ -1,26 +1,29 @@
 package keeparik_core.service;
 
+import keeparik_core.entity.BotUserEntity;
+import keeparik_core.entity.Role;
+import keeparik_core.repository.BotUserRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+
+import java.util.List;
 
 @Slf4j
 @Service
 public class AlertNotificationService {
 
     private final TelegramClient telegramClient;
-    private final Long adminChatId;
+    private final BotUserRepository userRepository;
 
     public AlertNotificationService(
             TelegramClient telegramClient,
-            @Value("${bot.admin-chat-id}") Long adminChatId
+            BotUserRepository userRepository
     ) {
         this.telegramClient = telegramClient;
-        this.adminChatId = adminChatId;
+        this.userRepository = userRepository;
     }
 
     public void notifyFailure(String serverName, String serviceName, String reason) {
@@ -31,16 +34,21 @@ public class AlertNotificationService {
                 Причина: `%s`
                 """, serverName, serviceName, reason);
 
-        SendMessage message = SendMessage.builder()
-                .chatId(adminChatId.toString())
-                .text(text)
-                .parseMode("Markdown")
-                .build();
+        // Достаем всех активных администраторов из БД
+        List<BotUserEntity> admins = userRepository.findAllByRoleAndIsActiveTrue(Role.ADMIN);
 
-        try {
-            telegramClient.execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Не удалось отправить экстренный алерт", e);
+        for (BotUserEntity admin : admins) {
+            SendMessage message = SendMessage.builder()
+                    .chatId(admin.getTelegramId().toString())
+                    .text(text)
+                    .parseMode("Markdown")
+                    .build();
+
+            try {
+                telegramClient.execute(message);
+            } catch (TelegramApiException e) {
+                log.error("Не удалось отправить экстренный алерт администратору {}", admin.getTelegramId(), e);
+            }
         }
     }
 }
